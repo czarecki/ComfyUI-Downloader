@@ -78,7 +78,7 @@ export class DownloaderUI {
                 break;
             case 'completed':
                 button.textContent = '✓ Downloaded';
-                button.disabled = true;
+                button.disabled = false;
                 button.style.backgroundColor = '#4CAF50';
                 button.dataset.action = 'none';
                 break;
@@ -183,7 +183,7 @@ export class DownloaderUI {
                     this.downloadStates.delete(download_id);
                     const button = this.modal.querySelector(`[data-download-id="${download_id}"]`);
                     if (button) {
-                        button.textContent = '📥 Download';
+                        button.textContent = 'Download';
                         button.disabled = false;
                         button.style.backgroundColor = '#4CAF50';
                     }
