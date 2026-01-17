@@ -428,6 +428,38 @@ export class DownloaderUI {
                     <button class="downloader-close-btn" id="downloader-close-btn">&times;</button>
                 </div>
                 <div class="downloader-modal-body">
+                    <div class="downloader-free-download-section" style="padding: 15px; background: #2a2a2a; border-radius: 5px; margin-bottom: 15px;">
+                        <div style="margin: 0 0 10px 0;">Manual Download</div>
+                        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <select 
+                                id="downloader-free-folder" 
+                                class="downloader-free-input"
+                                style="flex: 1; min-width: 150px; padding: 8px;"
+                            >
+                                <option value="">Select folder...</option>
+                            </select>
+                            <input 
+                                type="text" 
+                                id="downloader-free-url" 
+                                class="downloader-free-input"
+                                placeholder="Download URL..." 
+                                style="flex: 2; min-width: 300px; padding: 8px;"
+                            />
+                            <input 
+                                type="text" 
+                                id="downloader-free-filename" 
+                                class="downloader-free-input"
+                                placeholder="Filename (auto-detected)" 
+                                style="flex: 1; min-width: 200px; padding: 8px;"
+                            />
+                            <button 
+                                id="downloader-free-download-btn"
+                                style="padding: 8px 20px; cursor: pointer; background-color: #4CAF50; color: white; border: none; border-radius: 3px; font-weight: bold;"
+                            >
+                                Download
+                            </button>
+                        </div>
+                    </div>
                     <div class="downloader-refresh-section">
                         <button class="downloader-refresh-btn" id="downloader-refresh-btn">
                             Refresh Models
@@ -449,6 +481,82 @@ export class DownloaderUI {
         // Refresh button handler
         modal.querySelector("#downloader-refresh-btn").addEventListener("click", () => {
             this.scanWorkflowForModels();
+        });
+
+        // Auto-extract filename from URL
+        const urlInput = modal.querySelector("#downloader-free-url");
+        const filenameInput = modal.querySelector("#downloader-free-filename");
+        
+        urlInput.addEventListener("input", () => {
+            const url = urlInput.value.trim();
+            if (url) {
+                try {
+                    // Extract filename from URL
+                    const urlPath = new URL(url).pathname;
+                    const filename = urlPath.split('/').pop();
+                    if (filename && filename.includes('.')) {
+                        filenameInput.value = decodeURIComponent(filename);
+                    }
+                } catch (e) {
+                    // If URL parsing fails, try simple extraction
+                    const parts = url.split('/');
+                    const lastPart = parts[parts.length - 1];
+                    if (lastPart && lastPart.includes('.')) {
+                        filenameInput.value = decodeURIComponent(lastPart.split('?')[0]);
+                    }
+                }
+            }
+        });
+
+        // Free download button handler
+        modal.querySelector("#downloader-free-download-btn").addEventListener("click", async () => {
+            const folderInput = modal.querySelector("#downloader-free-folder");
+            const urlInputBtn = modal.querySelector("#downloader-free-url");
+            const filenameInputBtn = modal.querySelector("#downloader-free-filename");
+            
+            const folder = folderInput?.value.trim();
+            let filename = filenameInputBtn?.value.trim();
+            const url = urlInputBtn?.value.trim();
+            
+            if (!url) {
+                alert('Please enter a download URL');
+                return;
+            }
+            
+            if (!folder) {
+                alert('Please select a folder');
+                return;
+            }
+            
+            // Auto-extract filename if not provided
+            if (!filename) {
+                try {
+                    const urlPath = new URL(url).pathname;
+                    filename = urlPath.split('/').pop();
+                    if (filename) {
+                        filename = decodeURIComponent(filename);
+                    }
+                } catch (e) {
+                    const parts = url.split('/');
+                    filename = parts[parts.length - 1].split('?')[0];
+                    if (filename) {
+                        filename = decodeURIComponent(filename);
+                    }
+                }
+            }
+            
+            if (!filename) {
+                alert('Could not extract filename from URL. Please enter a filename manually.');
+                return;
+            }
+            
+            const result = await this.startServerDownload(url, folder, filename);
+            
+            // Clear inputs on successful download
+            if (result && result.success) {
+                filenameInputBtn.value = '';
+                urlInputBtn.value = '';
+            }
         });
 
         // Close modal when clicking outside
@@ -788,12 +896,24 @@ export class DownloaderUI {
         console.log("[DownloaderUI] UI initialization complete.");
     }
 
-    openModal() {
+    async openModal() {
         // Create and append modal to DOM
         this.modal = this.createModal();
         document.body.appendChild(this.modal);
         this.modal.style.display = "flex";
         console.log("[DownloaderUI] Modal opened.");
+        
+        // Populate folder dropdown in free download section
+        const folderSelect = this.modal.querySelector("#downloader-free-folder");
+        if (folderSelect) {
+            const folderNames = await this.loadFolderNames();
+            folderNames.forEach(folder => {
+                const option = document.createElement('option');
+                option.value = folder;
+                option.textContent = folder;
+                folderSelect.appendChild(option);
+            });
+        }
         
         // Automatically scan for models when opening
         this.scanWorkflowForModels();
