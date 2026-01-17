@@ -42,7 +42,6 @@ function addMenuButton() {
         if (!window.downloaderUI) {
             console.info(`[${EXTENSION_NAME}] Creating DownloaderUI instance...`);
             window.downloaderUI = new DownloaderUI();
-            document.body.appendChild(window.downloaderUI.modal);
 
             try {
                 await window.downloaderUI.initializeUI();
