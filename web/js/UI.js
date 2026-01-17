@@ -4,7 +4,7 @@ const API_PREFIX = "35b631e00fa2dbc173ee4a5f899cba8f";
 
 export class DownloaderUI {
     constructor() {
-        this.modal = this.createModal();
+        this.modal = null; // Modal will be created when opened
         this.isInitialized = false;
         this.modelsInWorkflow = [];
         this.modelListCache = null; // Cache for model-list.json
@@ -789,6 +789,9 @@ export class DownloaderUI {
     }
 
     openModal() {
+        // Create and append modal to DOM
+        this.modal = this.createModal();
+        document.body.appendChild(this.modal);
         this.modal.style.display = "flex";
         console.log("[DownloaderUI] Modal opened.");
         
@@ -797,7 +800,11 @@ export class DownloaderUI {
     }
 
     closeModal() {
-        this.modal.style.display = "none";
-        console.log("[DownloaderUI] Modal closed.");
+        if (this.modal) {
+            // Remove modal from DOM
+            this.modal.remove();
+            this.modal = null;
+            console.log("[DownloaderUI] Modal destroyed.");
+        }
     }
 }
