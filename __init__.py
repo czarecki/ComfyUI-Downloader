@@ -268,10 +268,12 @@ async def download_file(url, output_path, download_id):
 
     try:
         # Initialize control for this download
+        import time
         download_control[download_id] = {
             "paused": False,
             "cancelled": False,
             "total_downloaded": 0,
+            "last_progress_time": time.time(),
             "lock": asyncio.Lock()
         }
 
@@ -413,6 +415,14 @@ async def download_chunk_with_progress(session, url, start, end, output_path, ch
                     if download_control.get(download_id, {}).get("cancelled", False):
                         return
 
+                    # Check for stalled download (no progress for 10 seconds)
+                    import time
+                    current_time = time.time()
+                    if current_time - download_control[download_id]["last_progress_time"] > 10:
+                        logging.error(f"[ComfyUI-Downloader] Download stalled for {download_id} - no progress for 10 seconds")
+                        download_control[download_id]["cancelled"] = True
+                        raise Exception("Download stalled - no progress for 10 seconds")
+
                     f.write(chunk)
                     chunk_len = len(chunk)
                     downloaded += chunk_len
@@ -420,6 +430,7 @@ async def download_chunk_with_progress(session, url, start, end, output_path, ch
                     # Update shared progress counter with lock
                     async with download_control[download_id]["lock"]:
                         download_control[download_id]["total_downloaded"] += chunk_len
+                        download_control[download_id]["last_progress_time"] = time.time()
                         total_downloaded = download_control[download_id]["total_downloaded"]
 
                     # Send progress updates every 100ms to avoid spam (only from chunk 0)
@@ -462,8 +473,17 @@ async def download_single_connection(session, url, output_path, download_id, tot
                 if download_control.get(download_id, {}).get("cancelled", False):
                     return
 
+                # Check for stalled download (no progress for 10 seconds)
+                import time
+                current_time = time.time()
+                if current_time - download_control[download_id]["last_progress_time"] > 10:
+                    logging.error(f"[ComfyUI-Downloader] Download stalled for {download_id} - no progress for 10 seconds")
+                    download_control[download_id]["cancelled"] = True
+                    raise Exception("Download stalled - no progress for 10 seconds")
+
                 f.write(chunk)
                 downloaded_size += len(chunk)
+                download_control[download_id]["last_progress_time"] = time.time()
 
                 # Update progress
                 progress = round((downloaded_size / total_size) * 100, 2)
