@@ -21,11 +21,6 @@ Models urls are loaded from workflow or https://github.com/Comfy-Org/ComfyUI-Man
 
 ## Installation
 
-### Method 1: ComfyUI Manager (Recommended)
-1. Open ComfyUI Manager
-2. Search for "ComfyUI-Downloader"
-3. Click Install
-
 ### Method 2: Manual Installation
 1. Navigate to your ComfyUI custom nodes directory:
    ```bash
