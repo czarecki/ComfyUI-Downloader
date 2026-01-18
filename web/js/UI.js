@@ -65,7 +65,7 @@ export class DownloaderUI {
 
         switch (state.status) {
             case 'queued':
-                button.textContent = 'Cancel';
+                button.textContent = 'Cancel (queued)';
                 button.disabled = false;
                 button.style.backgroundColor = '#ffa500';
                 button.dataset.action = 'cancel';
