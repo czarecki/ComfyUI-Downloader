@@ -580,6 +580,41 @@ export class DownloaderUI {
     }
 
     /**
+     * Open folder in system file explorer for given save path and filename.
+     */
+    async openInExplorer(savePath, filename = '') {
+        if (!savePath) {
+            alert('Please select a folder first.');
+            return { success: false, error: 'Missing save path' };
+        }
+
+        try {
+            const response = await api.fetchApi(`/${API_PREFIX}/open_in_explorer`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    save_path: savePath,
+                    filename: filename || ''
+                })
+            });
+
+            const result = await response.json();
+            if (response.ok && result.success) {
+                return { success: true, opened_path: result.opened_path };
+            }
+
+            alert(`Failed to open folder: ${result.error || 'Unknown error'}`);
+            return { success: false, error: result.error };
+        } catch (error) {
+            console.error("[DownloaderUI] Failed to open folder:", error);
+            alert(`Failed to open folder: ${error.message}`);
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
      * Check if a file exists in the available files
      * @param {string} folder - The folder name
      * @param {string} filename - The filename (can include subdirectories)
@@ -1149,6 +1184,13 @@ export class DownloaderUI {
                         >
                             Download
                         </button>
+                        <button 
+                            class="downloader-open-folder-btn"
+                            data-model-index="${index}"
+                            style="padding: 6px 14px; cursor: pointer; background-color: #555; color: white; border: none; border-radius: 3px;"
+                        >
+                            Open Folder
+                        </button>
                     </div>
                 </div>
             `;
@@ -1237,6 +1279,34 @@ export class DownloaderUI {
                     this.updateDownloadButton(result.download_id);
                 }
             });
+
+            const openFolderButton = listContainer.querySelector(`.downloader-open-folder-btn[data-model-index="${modelIndex}"]`);
+            if (openFolderButton) {
+                openFolderButton.addEventListener('click', async () => {
+                    const directoryInput = listContainer.querySelector(`.downloader-directory-input[data-model-index="${modelIndex}"]`);
+                    const filenameInput = listContainer.querySelector(`.downloader-filename-input[data-model-index="${modelIndex}"]`);
+
+                    const directory = directoryInput?.value.trim() || '';
+                    const filenamePath = this.normalizeRelativePath(filenameInput?.value.trim() || '');
+
+                    if (!directory) {
+                        alert('Please select a folder/directory path first');
+                        return;
+                    }
+
+                    let openTarget = filenamePath;
+                    try {
+                        const matchInfo = await refreshMatchStatus();
+                        if (matchInfo && matchInfo.matchedFile) {
+                            openTarget = matchInfo.matchedFile;
+                        }
+                    } catch (error) {
+                        console.warn("[DownloaderUI] Failed to refresh match info before opening folder:", error);
+                    }
+
+                    await this.openInExplorer(directory, openTarget);
+                });
+            }
 
             const directoryInputForMatch = listContainer.querySelector(`.downloader-directory-input[data-model-index="${modelIndex}"]`);
             const filenameInputForMatch = listContainer.querySelector(`.downloader-filename-input[data-model-index="${modelIndex}"]`);

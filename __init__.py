@@ -4,9 +4,11 @@ Adds a Downloader button to ComfyUI interface with modal UI
 """
 
 import os
+import sys
 import logging
 import asyncio
 import shutil
+import subprocess
 import folder_paths
 from aiohttp import web
 from server import PromptServer
@@ -92,6 +94,33 @@ def _resolve_output_dir_for_save_path(save_path):
         raise ValueError(f"Invalid save_path for download: {save_path}")
 
     return os.path.abspath(paths[0]), mapped_folder
+
+
+def _normalize_relative_filename(filename):
+    """Normalize and validate relative filename/path from API input."""
+    safe_filename = os.path.normpath(filename).replace("\\", "/")
+    if not safe_filename or safe_filename in [".", "/"]:
+        return ""
+
+    if ".." in safe_filename or safe_filename.startswith("/") or safe_filename.startswith("~"):
+        raise ValueError("Invalid filename: path traversal patterns detected")
+
+    if safe_filename.startswith("../") or "/../" in safe_filename:
+        raise ValueError("Invalid filename: path traversal detected")
+
+    return safe_filename
+
+
+def _resolve_path_inside_dir(base_dir, relative_path):
+    """Resolve a relative path and ensure it stays within base_dir."""
+    output_path = os.path.abspath(os.path.join(base_dir, relative_path))
+    try:
+        common = os.path.commonpath([base_dir, output_path])
+    except ValueError:
+        common = ""
+    if common != base_dir:
+        raise ValueError("Security error: attempted directory escape")
+    return output_path
 
 
 @PromptServer.instance.routes.post(f"/{API_PREFIX}/server_download/start")
@@ -696,6 +725,59 @@ async def get_disk_space(request):
             {"error": str(e)},
             status=500
         )
+
+
+@PromptServer.instance.routes.post(f"/{API_PREFIX}/open_in_explorer")
+async def open_in_explorer(request):
+    """Open folder location in system file explorer for a save_path/filename."""
+    try:
+        json_data = await request.json()
+        save_path = (json_data.get("save_path") or "").strip()
+        filename = (json_data.get("filename") or "").strip()
+
+        if not save_path:
+            return web.json_response({"error": "Missing save_path"}, status=400)
+
+        try:
+            output_dir, mapped_folder = _resolve_output_dir_for_save_path(save_path)
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+
+        resolved_file_path = None
+        open_dir = output_dir
+
+        if filename:
+            try:
+                safe_filename = _normalize_relative_filename(filename)
+                if safe_filename:
+                    resolved_file_path = _resolve_path_inside_dir(output_dir, safe_filename)
+                    if os.path.isfile(resolved_file_path):
+                        open_dir = os.path.dirname(resolved_file_path)
+                    elif os.path.isdir(resolved_file_path):
+                        open_dir = resolved_file_path
+                    else:
+                        parent_dir = os.path.dirname(resolved_file_path)
+                        if parent_dir and os.path.isdir(parent_dir):
+                            open_dir = parent_dir
+            except ValueError as e:
+                return web.json_response({"error": str(e)}, status=400)
+
+        if os.name == "nt":
+            os.startfile(open_dir)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", open_dir])
+        else:
+            subprocess.Popen(["xdg-open", open_dir])
+
+        return web.json_response({
+            "success": True,
+            "save_path": mapped_folder,
+            "opened_path": open_dir,
+            "resolved_file_path": resolved_file_path
+        })
+    except Exception as e:
+        logging.error(f"[ComfyUI-Downloader] Error opening folder in explorer: {e}")
+        return web.json_response({"error": str(e)}, status=500)
 
 
 # Add route to serve CSS
