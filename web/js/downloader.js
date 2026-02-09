@@ -8,6 +8,7 @@ const EXTENSION_NAME = "ComfyUI-Downloader";
 const API_PREFIX = "35b631e00fa2dbc173ee4a5f899cba8f";
 const CSS_URL = `/${API_PREFIX}/extensions/ComfyUI-Downloader/css/downloader.css`;
 const USE_FLOATING_BUTTON = true;
+const FLOAT_POS_STORAGE_KEY = `${EXTENSION_NAME}.floatingButtonPos`;
 
 // Load CSS
 function loadCSS() {
@@ -100,9 +101,10 @@ function createAbsolutePositionButton() {
     
     // Floating position - bottom right
     downloaderButton.style.position = "fixed";
-    downloaderButton.style.right = "14px";
-    downloaderButton.style.bottom = "20px";
-    downloaderButton.style.top = "auto";
+    downloaderButton.style.left = "0px";
+    downloaderButton.style.top = "0px";
+    downloaderButton.style.right = "auto";
+    downloaderButton.style.bottom = "auto";
     downloaderButton.style.transform = "none";
     downloaderButton.style.zIndex = "9999";
     downloaderButton.style.padding = "10px 16px";
@@ -110,13 +112,132 @@ function createAbsolutePositionButton() {
     downloaderButton.style.color = "white";
     downloaderButton.style.border = "none";
     downloaderButton.style.borderRadius = "5px";
-    downloaderButton.style.cursor = "pointer";
+    downloaderButton.style.cursor = "grab";
+    downloaderButton.style.userSelect = "none";
+    downloaderButton.style.touchAction = "none";
     downloaderButton.style.boxShadow = "0 2px 5px rgba(0,0,0,0.3)";
 
-    downloaderButton.onclick = openDownloaderModal;
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+    const getBounds = () => ({
+        minX: 8,
+        minY: 8,
+        maxX: Math.max(8, window.innerWidth - downloaderButton.offsetWidth - 8),
+        maxY: Math.max(8, window.innerHeight - downloaderButton.offsetHeight - 8),
+    });
+
+    const applyPosition = (x, y) => {
+        const bounds = getBounds();
+        const safeX = clamp(x, bounds.minX, bounds.maxX);
+        const safeY = clamp(y, bounds.minY, bounds.maxY);
+        downloaderButton.style.left = `${safeX}px`;
+        downloaderButton.style.top = `${safeY}px`;
+    };
+
+    const savePosition = () => {
+        const x = parseInt(downloaderButton.style.left, 10) || 0;
+        const y = parseInt(downloaderButton.style.top, 10) || 0;
+        localStorage.setItem(FLOAT_POS_STORAGE_KEY, JSON.stringify({ x, y }));
+    };
+
+    const getManagerButton = () => {
+        const byId = document.querySelector("#comfyui-manager-button, #cm-button, #manager-button");
+        if (byId) return byId;
+        const candidates = Array.from(document.querySelectorAll("button"));
+        return candidates.find(b => (b.textContent || "").trim().toLowerCase() === "manager") || null;
+    };
+
+    const getDefaultPosition = () => {
+        const managerBtn = getManagerButton();
+        if (managerBtn) {
+            const rect = managerBtn.getBoundingClientRect();
+            return {
+                x: rect.right + 12,
+                y: rect.top,
+            };
+        }
+        return {
+            x: window.innerWidth - 170,
+            y: 76,
+        };
+    };
+
+    const loadInitialPosition = () => {
+        let loaded = false;
+        const saved = localStorage.getItem(FLOAT_POS_STORAGE_KEY);
+        if (saved) {
+            try {
+                const parsed = JSON.parse(saved);
+                if (typeof parsed.x === "number" && typeof parsed.y === "number") {
+                    applyPosition(parsed.x, parsed.y);
+                    loaded = true;
+                }
+            } catch (error) {
+                console.warn(`[${EXTENSION_NAME}] Failed to parse saved button position:`, error);
+            }
+        }
+        if (!loaded) {
+            const pos = getDefaultPosition();
+            applyPosition(pos.x, pos.y);
+        }
+    };
+
+    let isDragging = false;
+    let dragMoved = false;
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
+    let suppressClick = false;
+
+    downloaderButton.addEventListener("pointerdown", (event) => {
+        isDragging = true;
+        dragMoved = false;
+        dragOffsetX = event.clientX - downloaderButton.offsetLeft;
+        dragOffsetY = event.clientY - downloaderButton.offsetTop;
+        downloaderButton.style.cursor = "grabbing";
+        downloaderButton.setPointerCapture(event.pointerId);
+    });
+
+    downloaderButton.addEventListener("pointermove", (event) => {
+        if (!isDragging) return;
+        dragMoved = true;
+        applyPosition(event.clientX - dragOffsetX, event.clientY - dragOffsetY);
+    });
+
+    const finishDrag = (event) => {
+        if (!isDragging) return;
+        isDragging = false;
+        downloaderButton.style.cursor = "grab";
+        if (event && downloaderButton.hasPointerCapture(event.pointerId)) {
+            downloaderButton.releasePointerCapture(event.pointerId);
+        }
+        if (dragMoved) {
+            savePosition();
+            suppressClick = true;
+            setTimeout(() => {
+                suppressClick = false;
+            }, 120);
+        }
+    };
+
+    downloaderButton.addEventListener("pointerup", finishDrag);
+    downloaderButton.addEventListener("pointercancel", finishDrag);
+
+    downloaderButton.onclick = async () => {
+        if (suppressClick) return;
+        await openDownloaderModal();
+    };
 
     document.body.appendChild(downloaderButton);
-    console.log(`[${EXTENSION_NAME}] Downloader button added in floating position (bottom right).`);
+    requestAnimationFrame(loadInitialPosition);
+
+    // Re-clamp position on viewport resize.
+    window.addEventListener("resize", () => {
+        const x = parseInt(downloaderButton.style.left, 10) || 0;
+        const y = parseInt(downloaderButton.style.top, 10) || 0;
+        applyPosition(x, y);
+        savePosition();
+    });
+
+    console.log(`[${EXTENSION_NAME}] Downloader button added in floating draggable mode.`);
 }
 
 // --- Initialization ---
