@@ -26,6 +26,7 @@ export class DownloaderUI {
     constructor() {
         this.modal = null; // Modal will be created when opened
         this.isInitialized = false;
+        this.strictMatchMode = false;
         this.modelsInWorkflow = [];
         this.modelListCache = null; // Cache for model-list.json
         this.modelExtensionsCache = null; // Cache for supported extensions
@@ -406,6 +407,178 @@ export class DownloaderUI {
         return availableFiles;
     }
 
+    getFileExtension(path) {
+        const normalized = this.normalizeRelativePath(path);
+        const name = normalized.split('/').pop() || normalized;
+        const dotIndex = name.lastIndexOf('.');
+        if (dotIndex <= 0 || dotIndex === name.length - 1) {
+            return '';
+        }
+        return name.slice(dotIndex).toLowerCase();
+    }
+
+    getBaseName(path) {
+        const normalized = this.normalizeRelativePath(path);
+        return normalized.split('/').pop() || normalized;
+    }
+
+    normalizeModelName(name) {
+        const base = this.getBaseName(name).toLowerCase();
+        const noExt = base.replace(/\.[^.]+$/, '');
+        return noExt
+            .replace(/\b(v|ver|version)\s*\d+(\.\d+)?\b/g, '')
+            .replace(/\b(fp16|fp32|bf16|pruned|final|latest)\b/g, '')
+            .replace(/[\s._\-()[\]{}]+/g, '');
+    }
+
+    stringSimilarity(a, b) {
+        const left = (a || '').trim();
+        const right = (b || '').trim();
+        if (!left || !right) {
+            return 0;
+        }
+        if (left === right) {
+            return 1;
+        }
+        if (left.length < 2 || right.length < 2) {
+            return left === right ? 1 : 0;
+        }
+
+        const leftBigrams = new Map();
+        for (let i = 0; i < left.length - 1; i++) {
+            const gram = left.slice(i, i + 2);
+            leftBigrams.set(gram, (leftBigrams.get(gram) || 0) + 1);
+        }
+
+        let intersection = 0;
+        for (let i = 0; i < right.length - 1; i++) {
+            const gram = right.slice(i, i + 2);
+            const count = leftBigrams.get(gram) || 0;
+            if (count > 0) {
+                leftBigrams.set(gram, count - 1);
+                intersection += 1;
+            }
+        }
+
+        return (2 * intersection) / ((left.length - 1) + (right.length - 1));
+    }
+
+    /**
+     * Return match status for expected model file in target folder.
+     * status: installed | likely | possible | missing
+     */
+    async getFileMatchInfo(folder, filename) {
+        const availableFiles = await this.getAvailableFiles();
+        const normalizedFilename = this.normalizeRelativePath(filename);
+        if (!folder || !normalizedFilename || !availableFiles.has(folder)) {
+            return { status: 'missing', label: 'Missing' };
+        }
+
+        const filesInFolder = Array.from(availableFiles.get(folder));
+        if (filesInFolder.length === 0) {
+            return { status: 'missing', label: 'Missing' };
+        }
+
+        if (filesInFolder.includes(normalizedFilename)) {
+            return { status: 'installed', label: 'Installed', matchedFile: normalizedFilename };
+        }
+
+        if (this.strictMatchMode) {
+            return { status: 'missing', label: 'Missing (strict mode)' };
+        }
+
+        const targetBase = this.getBaseName(normalizedFilename);
+        const targetExt = this.getFileExtension(targetBase);
+        const targetNorm = this.normalizeModelName(targetBase);
+
+        let bestCandidate = null;
+        let bestScore = 0;
+
+        for (const file of filesInFolder) {
+            const candidatePath = this.normalizeRelativePath(file);
+            const candidateBase = this.getBaseName(candidatePath);
+            const candidateExt = this.getFileExtension(candidateBase);
+
+            if (candidateBase === targetBase || candidatePath.endsWith('/' + targetBase)) {
+                return { status: 'likely', label: 'Likely (same filename)', matchedFile: candidatePath };
+            }
+
+            if (targetExt && candidateExt && targetExt !== candidateExt) {
+                continue;
+            }
+
+            const candidateNorm = this.normalizeModelName(candidateBase);
+            if (!candidateNorm || !targetNorm) {
+                continue;
+            }
+
+            if (candidateNorm === targetNorm) {
+                return { status: 'likely', label: 'Likely (normalized name)', matchedFile: candidatePath };
+            }
+
+            const score = this.stringSimilarity(targetNorm, candidateNorm);
+            if (score > bestScore) {
+                bestScore = score;
+                bestCandidate = candidatePath;
+            }
+        }
+
+        if (bestCandidate && bestScore >= 0.9) {
+            return {
+                status: 'possible',
+                label: `Possible (${Math.round(bestScore * 100)}% name match)`,
+                matchedFile: bestCandidate
+            };
+        }
+
+        return { status: 'missing', label: 'Missing' };
+    }
+
+    updateModelMatchIndicator(modelIndex, info, button = null, folder = '') {
+        const badge = this.modal?.querySelector(`.downloader-model-match[data-model-index="${modelIndex}"]`);
+        if (!badge || !info) {
+            return;
+        }
+
+        let details = '';
+        if (info.status === 'installed' && info.matchedFile) {
+            const fullPath = folder ? `${folder}/${info.matchedFile}` : info.matchedFile;
+            details = ` - ${fullPath}`;
+        } else if (info.status !== 'installed' && info.matchedFile) {
+            details = ` - ${info.matchedFile}`;
+        }
+        badge.textContent = `Status: ${info.label}${details}`;
+
+        switch (info.status) {
+            case 'installed':
+                badge.style.color = '#4CAF50';
+                break;
+            case 'likely':
+                badge.style.color = '#ffb347';
+                break;
+            case 'possible':
+                badge.style.color = '#ffd166';
+                break;
+            default:
+                badge.style.color = '#d6d6d6';
+                break;
+        }
+
+        if (!button) {
+            return;
+        }
+
+        if (info.status === 'installed') {
+            button.textContent = '✓ Downloaded';
+            button.style.backgroundColor = '#4CAF50';
+            button.disabled = false;
+        } else if (!button.dataset.action || button.dataset.action === 'download') {
+            button.textContent = 'Download';
+            button.style.backgroundColor = '#4CAF50';
+            button.disabled = false;
+        }
+    }
+
     /**
      * Check if a file exists in the available files
      * @param {string} folder - The folder name
@@ -413,28 +586,8 @@ export class DownloaderUI {
      * @returns {boolean} - True if file exists
      */
     async isFileDownloaded(folder, filename) {
-        const availableFiles = await this.getAvailableFiles();
-        const normalizedFilename = this.normalizeRelativePath(filename);
-        
-        if (!availableFiles.has(folder)) {
-            return false;
-        }
-
-        const filesInFolder = availableFiles.get(folder);
-        
-        // Check exact match
-        if (filesInFolder.has(normalizedFilename)) {
-            return true;
-        }
-
-        // Check if any file ends with this filename (for subdirectory cases)
-        for (const file of filesInFolder) {
-            if (file.endsWith(normalizedFilename) || file.endsWith('/' + normalizedFilename)) {
-                return true;
-            }
-        }
-
-        return false;
+        const info = await this.getFileMatchInfo(folder, filename);
+        return info.status === 'installed';
     }
 
     /**
@@ -552,6 +705,10 @@ export class DownloaderUI {
                             Refresh Models
                         </button>
                         <span class="downloader-model-count" id="downloader-model-count">0 models found</span>
+                        <label for="downloader-strict-match-toggle" style="margin-left: 10px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+                            <input type="checkbox" id="downloader-strict-match-toggle" />
+                            Strict match
+                        </label>
                         <span id="downloader-global-disk-space" style="margin-left: 10px; font-size: 12px; opacity: 0.85;">
                             Models storage free: checking...
                         </span>
@@ -572,6 +729,17 @@ export class DownloaderUI {
         modal.querySelector("#downloader-refresh-btn").addEventListener("click", () => {
             this.scanWorkflowForModels();
         });
+
+        const strictToggle = modal.querySelector("#downloader-strict-match-toggle");
+        if (strictToggle) {
+            strictToggle.checked = this.strictMatchMode;
+            strictToggle.addEventListener("change", async () => {
+                this.strictMatchMode = strictToggle.checked;
+                if (Array.isArray(this.modelsInWorkflow) && this.modelsInWorkflow.length > 0) {
+                    await this.displayModels(this.modelsInWorkflow);
+                }
+            });
+        }
 
         // Auto-extract filename from URL
         const urlInput = modal.querySelector("#downloader-free-url");
@@ -938,6 +1106,9 @@ export class DownloaderUI {
                     <div class="downloader-model-path" title="${this.escapeHtml(model.fullPath)}">
                         ${this.escapeHtml(model.fullPath)}
                     </div>
+                    <div class="downloader-model-match" data-model-index="${index}" style="font-size: 12px; opacity: 0.9; margin: 4px 0 6px 0;">
+                        Status: checking...
+                    </div>
                     <div class="downloader-model-node">
                         Used in: ${this.escapeHtml(model.nodeTitle)}
                     </div>
@@ -996,9 +1167,19 @@ export class DownloaderUI {
             const modelIndex = parseInt(button.dataset.modelIndex);
             const model = this.modelsInWorkflow[modelIndex];
             const initialPath = this.normalizeRelativePath(model.filenamePath || model.filename);
+            const refreshMatchStatus = async () => {
+                const directoryInputLive = listContainer.querySelector(`.downloader-directory-input[data-model-index="${modelIndex}"]`);
+                const filenameInputLive = listContainer.querySelector(`.downloader-filename-input[data-model-index="${modelIndex}"]`);
+                const liveDirectory = (directoryInputLive?.value || model.directory || '').trim();
+                const liveFilename = this.normalizeRelativePath(filenameInputLive?.value || initialPath);
+                const matchInfo = await this.getFileMatchInfo(liveDirectory, liveFilename);
+                this.updateModelMatchIndicator(modelIndex, matchInfo, button, liveDirectory);
+                return matchInfo;
+            };
             
             // Check if file already exists in ComfyUI
-            const fileExists = await this.isFileDownloaded(model.directory || '', initialPath);
+            const initialMatch = await refreshMatchStatus();
+            const fileExists = initialMatch.status === 'installed';
             if (fileExists) {
                 button.textContent = '✓ Downloaded';
                 button.style.backgroundColor = '#4CAF50';
@@ -1056,6 +1237,16 @@ export class DownloaderUI {
                     this.updateDownloadButton(result.download_id);
                 }
             });
+
+            const directoryInputForMatch = listContainer.querySelector(`.downloader-directory-input[data-model-index="${modelIndex}"]`);
+            const filenameInputForMatch = listContainer.querySelector(`.downloader-filename-input[data-model-index="${modelIndex}"]`);
+            if (directoryInputForMatch) {
+                directoryInputForMatch.addEventListener('change', refreshMatchStatus);
+            }
+            if (filenameInputForMatch) {
+                filenameInputForMatch.addEventListener('change', refreshMatchStatus);
+                filenameInputForMatch.addEventListener('blur', refreshMatchStatus);
+            }
         });
     }
 
