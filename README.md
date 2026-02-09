@@ -2,6 +2,24 @@
 
 A powerful and user-friendly extension for ComfyUI that adds a built-in model downloader with a sleek modal interface. Download models, LoRAs, VAEs, and other assets directly from URLs without leaving ComfyUI.
 
+## Fork Notice
+
+This repository is a fork of:
+- https://github.com/romandev-codex/ComfyUI-Downloader
+
+Attribution to the original author is preserved.
+The project remains under the same MIT License.
+
+## Fork Changes (czarecki)
+
+This fork currently adds reliability and UX improvements for model destination paths:
+
+- Fixed Windows path handling for model folder detection in backend logic.
+- Improved folder validation to allow model-related targets and block non-model folders.
+- Added explicit filename/path input per workflow model row (`subfolder/file.ext` support).
+- Added optional subfolder input in manual download mode.
+- Restored and improved `model-list.json` directory/type mapping so default destinations are selected more accurately.
+
 ## Features
 
 - 🚀 **High-Speed Downloads**: Optimized for datacenter connections with parallel downloading (8 connections, 32MB chunks)
