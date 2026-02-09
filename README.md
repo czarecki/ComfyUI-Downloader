@@ -45,7 +45,12 @@ Models urls are loaded from workflow or https://github.com/Comfy-Org/ComfyUI-Man
    cd ComfyUI/custom_nodes/
    ```
 
-2. Clone this repository:
+2. Clone the fork (recommended for the latest fixes in this repo):
+   ```bash
+   git clone https://github.com/czarecki/ComfyUI-Downloader.git
+   ```
+
+   Or clone the upstream/original project:
    ```bash
    git clone https://github.com/romandev-codex/ComfyUI-Downloader.git
    ```
