@@ -1203,6 +1203,46 @@ export class DownloaderUI {
         // Pre-load available files to populate cache (prevents multiple API calls)
         await this.getAvailableFiles();
 
+        // Bind once per modal lifecycle - robust handling for dynamically rebuilt rows.
+        if (!listContainer.dataset.openFolderHandlerAttached) {
+            listContainer.addEventListener('click', async (event) => {
+                const openFolderButton = event.target.closest('.downloader-open-folder-btn');
+                if (!openFolderButton) {
+                    return;
+                }
+
+                const modelIndex = parseInt(openFolderButton.dataset.modelIndex || '', 10);
+                if (Number.isNaN(modelIndex)) {
+                    return;
+                }
+
+                const directoryInput = listContainer.querySelector(`.downloader-directory-input[data-model-index="${modelIndex}"]`);
+                const filenameInput = listContainer.querySelector(`.downloader-filename-input[data-model-index="${modelIndex}"]`);
+
+                const directory = directoryInput?.value.trim() || '';
+                const filenamePath = this.normalizeRelativePath(filenameInput?.value.trim() || '');
+
+                if (!directory) {
+                    alert('Please select a folder/directory path first');
+                    return;
+                }
+
+                let openTarget = filenamePath;
+                try {
+                    const matchInfo = await this.getFileMatchInfo(directory, filenamePath);
+                    this.updateModelMatchIndicator(modelIndex, matchInfo, null, directory);
+                    if (matchInfo && matchInfo.matchedFile) {
+                        openTarget = matchInfo.matchedFile;
+                    }
+                } catch (error) {
+                    console.warn("[DownloaderUI] Failed to refresh match info before opening folder:", error);
+                }
+
+                await this.openInExplorer(directory, openTarget);
+            });
+            listContainer.dataset.openFolderHandlerAttached = '1';
+        }
+
         // Add event listeners to download buttons
         const downloadButtons = listContainer.querySelectorAll('.downloader-download-btn');
         downloadButtons.forEach(async (button) => {
@@ -1279,34 +1319,6 @@ export class DownloaderUI {
                     this.updateDownloadButton(result.download_id);
                 }
             });
-
-            const openFolderButton = listContainer.querySelector(`.downloader-open-folder-btn[data-model-index="${modelIndex}"]`);
-            if (openFolderButton) {
-                openFolderButton.addEventListener('click', async () => {
-                    const directoryInput = listContainer.querySelector(`.downloader-directory-input[data-model-index="${modelIndex}"]`);
-                    const filenameInput = listContainer.querySelector(`.downloader-filename-input[data-model-index="${modelIndex}"]`);
-
-                    const directory = directoryInput?.value.trim() || '';
-                    const filenamePath = this.normalizeRelativePath(filenameInput?.value.trim() || '');
-
-                    if (!directory) {
-                        alert('Please select a folder/directory path first');
-                        return;
-                    }
-
-                    let openTarget = filenamePath;
-                    try {
-                        const matchInfo = await refreshMatchStatus();
-                        if (matchInfo && matchInfo.matchedFile) {
-                            openTarget = matchInfo.matchedFile;
-                        }
-                    } catch (error) {
-                        console.warn("[DownloaderUI] Failed to refresh match info before opening folder:", error);
-                    }
-
-                    await this.openInExplorer(directory, openTarget);
-                });
-            }
 
             const directoryInputForMatch = listContainer.querySelector(`.downloader-directory-input[data-model-index="${modelIndex}"]`);
             const filenameInputForMatch = listContainer.querySelector(`.downloader-filename-input[data-model-index="${modelIndex}"]`);
