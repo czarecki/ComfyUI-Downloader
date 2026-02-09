@@ -7,6 +7,7 @@ console.log("Loading ComfyUI-Downloader...");
 const EXTENSION_NAME = "ComfyUI-Downloader";
 const API_PREFIX = "35b631e00fa2dbc173ee4a5f899cba8f";
 const CSS_URL = `/${API_PREFIX}/extensions/ComfyUI-Downloader/css/downloader.css`;
+const USE_FLOATING_BUTTON = true;
 
 // Load CSS
 function loadCSS() {
@@ -20,6 +21,27 @@ function loadCSS() {
 // Add Menu Button to ComfyUI
 let retryCount = 0;
 const MAX_RETRIES = 10;
+
+async function openDownloaderModal() {
+    if (!window.downloaderUI) {
+        console.info(`[${EXTENSION_NAME}] Creating DownloaderUI instance...`);
+        window.downloaderUI = new DownloaderUI();
+
+        try {
+            await window.downloaderUI.initializeUI();
+            console.info(`[${EXTENSION_NAME}] UI Initialization complete.`);
+        } catch (error) {
+            console.error(`[${EXTENSION_NAME}] Error during UI initialization:`, error);
+        }
+    }
+
+    if (window.downloaderUI) {
+        window.downloaderUI.openModal();
+    } else {
+        console.error(`[${EXTENSION_NAME}] Cannot open modal: UI instance not available.`);
+        alert("Downloader failed to initialize. Please check the browser console for errors.");
+    }
+}
 
 function addMenuButton() {
     const buttonGroup = document.querySelector(".comfyui-button-group");
@@ -48,26 +70,7 @@ function addMenuButton() {
     downloaderButton.title = "Open Downloader";
     downloaderButton.style.margin = "0 5px";
 
-    downloaderButton.onclick = async () => {
-        if (!window.downloaderUI) {
-            console.info(`[${EXTENSION_NAME}] Creating DownloaderUI instance...`);
-            window.downloaderUI = new DownloaderUI();
-
-            try {
-                await window.downloaderUI.initializeUI();
-                console.info(`[${EXTENSION_NAME}] UI Initialization complete.`);
-            } catch (error) {
-                console.error(`[${EXTENSION_NAME}] Error during UI initialization:`, error);
-            }
-        }
-
-        if (window.downloaderUI) {
-            window.downloaderUI.openModal();
-        } else {
-            console.error(`[${EXTENSION_NAME}] Cannot open modal: UI instance not available.`);
-            alert("Downloader failed to initialize. Please check the browser console for errors.");
-        }
-    };
+    downloaderButton.onclick = openDownloaderModal;
 
     buttonGroup.appendChild(downloaderButton);
     console.log(`[${EXTENSION_NAME}] Downloader button added to .comfyui-button-group.`);
@@ -95,13 +98,14 @@ function createAbsolutePositionButton() {
     downloaderButton.id = "downloader-button";
     downloaderButton.title = "Open Downloader";
     
-    // Absolute positioning - right middle
+    // Floating position - bottom right
     downloaderButton.style.position = "fixed";
-    downloaderButton.style.right = "10px";
-    downloaderButton.style.top = "50%";
-    downloaderButton.style.transform = "translateY(-50%)";
+    downloaderButton.style.right = "14px";
+    downloaderButton.style.bottom = "20px";
+    downloaderButton.style.top = "auto";
+    downloaderButton.style.transform = "none";
     downloaderButton.style.zIndex = "9999";
-    downloaderButton.style.padding = "10px 15px";
+    downloaderButton.style.padding = "10px 16px";
     downloaderButton.style.backgroundColor = "#4CAF50";
     downloaderButton.style.color = "white";
     downloaderButton.style.border = "none";
@@ -109,29 +113,10 @@ function createAbsolutePositionButton() {
     downloaderButton.style.cursor = "pointer";
     downloaderButton.style.boxShadow = "0 2px 5px rgba(0,0,0,0.3)";
 
-    downloaderButton.onclick = async () => {
-        if (!window.downloaderUI) {
-            console.info(`[${EXTENSION_NAME}] Creating DownloaderUI instance...`);
-            window.downloaderUI = new DownloaderUI();
-
-            try {
-                await window.downloaderUI.initializeUI();
-                console.info(`[${EXTENSION_NAME}] UI Initialization complete.`);
-            } catch (error) {
-                console.error(`[${EXTENSION_NAME}] Error during UI initialization:`, error);
-            }
-        }
-
-        if (window.downloaderUI) {
-            window.downloaderUI.openModal();
-        } else {
-            console.error(`[${EXTENSION_NAME}] Cannot open modal: UI instance not available.`);
-            alert("Downloader failed to initialize. Please check the browser console for errors.");
-        }
-    };
+    downloaderButton.onclick = openDownloaderModal;
 
     document.body.appendChild(downloaderButton);
-    console.log(`[${EXTENSION_NAME}] Downloader button added in absolute position (right middle).`);
+    console.log(`[${EXTENSION_NAME}] Downloader button added in floating position (bottom right).`);
 }
 
 // --- Initialization ---
@@ -140,7 +125,11 @@ app.registerExtension({
     async setup(appInstance) {
         console.log(`[${EXTENSION_NAME}] Setting up Downloader Extension...`);
         loadCSS();
-        addMenuButton();
+        if (USE_FLOATING_BUTTON) {
+            createAbsolutePositionButton();
+        } else {
+            addMenuButton();
+        }
         console.log(`[${EXTENSION_NAME}] Extension setup complete. UI will initialize on first click.`);
     },
 });

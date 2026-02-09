@@ -123,6 +123,36 @@ def _resolve_path_inside_dir(base_dir, relative_path):
     return output_path
 
 
+def _open_explorer_and_focus(path, select_file=False):
+    """Open File Explorer and try to bring it to foreground on Windows."""
+    safe_path = path.replace("'", "''")
+
+    if select_file:
+        ps_script = f"""
+$target = '{safe_path}'
+$args = "/select,`"$target`""
+$p = Start-Process -FilePath explorer.exe -ArgumentList $args -PassThru
+Start-Sleep -Milliseconds 250
+$shell = New-Object -ComObject WScript.Shell
+$null = $shell.AppActivate($p.Id)
+"""
+    else:
+        ps_script = f"""
+$target = '{safe_path}'
+$args = "`"$target`""
+$p = Start-Process -FilePath explorer.exe -ArgumentList $args -PassThru
+Start-Sleep -Milliseconds 250
+$shell = New-Object -ComObject WScript.Shell
+$null = $shell.AppActivate($p.Id)
+"""
+
+    subprocess.Popen(
+        ["powershell", "-NoProfile", "-Command", ps_script],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+
 @PromptServer.instance.routes.post(f"/{API_PREFIX}/server_download/start")
 async def start_download(request):
     """Start downloading a model file to the server"""
@@ -763,7 +793,10 @@ async def open_in_explorer(request):
                 return web.json_response({"error": str(e)}, status=400)
 
         if os.name == "nt":
-            os.startfile(open_dir)
+            if resolved_file_path and os.path.isfile(resolved_file_path):
+                _open_explorer_and_focus(resolved_file_path, select_file=True)
+            else:
+                _open_explorer_and_focus(open_dir, select_file=False)
         elif sys.platform == "darwin":
             subprocess.Popen(["open", open_dir])
         else:
