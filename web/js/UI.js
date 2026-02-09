@@ -1,6 +1,26 @@
 import { api } from "../../../scripts/api.js";
 
 const API_PREFIX = "35b631e00fa2dbc173ee4a5f899cba8f";
+const MODEL_DIR_NAME_MAP = {
+    checkpoints: "checkpoints",
+    checkpoint: "checkpoints",
+    unclip: "checkpoints",
+    text_encoders: "text_encoders",
+    clip: "text_encoders",
+    vae: "vae",
+    lora: "loras",
+    "t2i-adapter": "controlnet",
+    "t2i-style": "controlnet",
+    controlnet: "controlnet",
+    clip_vision: "clip_vision",
+    gligen: "gligen",
+    upscale: "upscale_models",
+    embedding: "embeddings",
+    embeddings: "embeddings",
+    unet: "diffusion_models",
+    diffusion_model: "diffusion_models",
+    diffusion_models: "diffusion_models",
+};
 
 export class DownloaderUI {
     constructor() {
@@ -384,18 +404,53 @@ export class DownloaderUI {
     async getModelInfo(filename) {
         const modelList = await this.loadModelList();
         if (!modelList || !Array.isArray(modelList.models)) {
-            return { url: null, directory: null };
+            return { url: null, directory: null, type: null };
         }
 
         const model = modelList.models.find(m => m.filename === filename);
         if (!model) {
-            return { url: null, directory: null };
+            return { url: null, directory: null, type: null };
         }
 
         return {
             url: model.url || null,
-            // directory: model.save_path || null
+            directory: model.save_path || model.directory || null,
+            type: model.type || null,
         };
+    }
+
+    normalizeRelativePath(path) {
+        if (!path) {
+            return '';
+        }
+        return path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    }
+
+    resolveModelDirectory(savePath, modelType, folderNameSet = null) {
+        let resolved = null;
+
+        if (savePath) {
+            if (savePath.toLowerCase() === 'default') {
+                const typeKey = (modelType || '').toLowerCase();
+                resolved = MODEL_DIR_NAME_MAP[typeKey] || null;
+            } else {
+                const normalized = this.normalizeRelativePath(savePath);
+                resolved = normalized ? normalized.split('/')[0] : null;
+            }
+        } else if (modelType) {
+            const typeKey = modelType.toLowerCase();
+            resolved = MODEL_DIR_NAME_MAP[typeKey] || null;
+        }
+
+        if (!resolved) {
+            return null;
+        }
+
+        if (folderNameSet && !folderNameSet.has(resolved)) {
+            return null;
+        }
+
+        return resolved;
     }
 
     createModal() {
@@ -434,6 +489,13 @@ export class DownloaderUI {
                                 class="downloader-free-input"
                                 placeholder="Filename (auto-detected)" 
                                 style="flex: 1; min-width: 200px; padding: 5px;"
+                            />
+                            <input 
+                                type="text" 
+                                id="downloader-free-subfolder" 
+                                class="downloader-free-input"
+                                placeholder="Subfolder (optional), e.g. SDXL"
+                                style="flex: 1; min-width: 220px; padding: 5px;"
                             />
                             <button 
                                 id="downloader-free-download-btn"
@@ -496,9 +558,11 @@ export class DownloaderUI {
             const folderInput = modal.querySelector("#downloader-free-folder");
             const urlInputBtn = modal.querySelector("#downloader-free-url");
             const filenameInputBtn = modal.querySelector("#downloader-free-filename");
+            const subfolderInputBtn = modal.querySelector("#downloader-free-subfolder");
             
             const folder = folderInput?.value.trim();
             let filename = filenameInputBtn?.value.trim();
+            const subfolder = subfolderInputBtn?.value.trim() || '';
             const url = urlInputBtn?.value.trim();
             
             if (!url) {
@@ -532,13 +596,23 @@ export class DownloaderUI {
                 alert('Could not extract filename from URL. Please enter a filename manually.');
                 return;
             }
+
+            // Keep filename clean and use subfolder field for path segments.
+            filename = this.normalizeRelativePath(filename).split('/').pop();
+            if (!filename) {
+                alert('Invalid filename');
+                return;
+            }
+
+            const normalizedSubfolder = this.normalizeRelativePath(subfolder);
+            const filenamePath = normalizedSubfolder ? `${normalizedSubfolder}/${filename}` : filename;
             
             // Create a new model entry for manual download
             const extension = '.' + filename.split('.').pop().toLowerCase();
             const newModel = {
                 filename: filename,
-                filenamePath: filename,
-                fullPath: `${folder}/${filename}`,
+                filenamePath: filenamePath,
+                fullPath: `${folder}/${filenamePath}`,
                 extension: extension,
                 url: url,
                 directory: folder,
@@ -553,7 +627,7 @@ export class DownloaderUI {
             await this.displayModels(this.modelsInWorkflow);
             
             // Start the download
-            const result = await this.startServerDownload(url, folder, filename);
+            const result = await this.startServerDownload(url, folder, filenamePath);
             
             // If download started successfully, update the button's download_id
             if (result && result.success && result.download_id) {
@@ -571,6 +645,7 @@ export class DownloaderUI {
                 filenameInputBtn.value = '';
                 urlInputBtn.value = '';
                 folderInput.value = '';
+                subfolderInputBtn.value = '';
             }
         });
 
@@ -592,6 +667,8 @@ export class DownloaderUI {
         
         // Model file extensions to look for - fetch from API
         const modelExtensions = await this.loadModelExtensions();
+        const folderNames = await this.loadFolderNames();
+        const folderNameSet = new Set(folderNames);
         const modelsFound = new Map(); // Use Map to avoid duplicates
         
         // Access the ComfyUI app graph
@@ -611,24 +688,28 @@ export class DownloaderUI {
                     node.properties.models.forEach((model) => {
                         const filename = model.name || model.filename;
                         if (filename) {
+                            const normalizedFilename = this.normalizeRelativePath(filename);
+                            const displayName = normalizedFilename.split('/').pop();
+                            const resolvedDirectory = this.resolveModelDirectory(model.directory || null, model.type || null, folderNameSet);
+                            const filenamePath = normalizedFilename || displayName;
                             if (modelsFound.has(filename)) {
                                 // Only update URL if present
                                 const existing = modelsFound.get(filename);
                                 if (model.url) {
                                     existing.url = model.url;
                                 }
-                                if (model.directory && !existing.directory) {
-                                    existing.directory = model.directory;
+                                if (resolvedDirectory && !existing.directory) {
+                                    existing.directory = resolvedDirectory;
                                 }
                             } else {
                                 // Add new model entry
                                 modelsFound.set(filename, {
-                                    filename: filename,
-                                    filenamePath: filename,
-                                    fullPath: model.directory ? `${model.directory}/${filename}` : filename,
-                                    extension: '.' + filename.split('.').pop().toLowerCase(),
+                                    filename: displayName,
+                                    filenamePath: filenamePath,
+                                    fullPath: resolvedDirectory ? `${resolvedDirectory}/${filenamePath}` : filenamePath,
+                                    extension: '.' + displayName.split('.').pop().toLowerCase(),
                                     url: model.url || null,
-                                    directory: model.directory || null,
+                                    directory: resolvedDirectory,
                                     nodeType: node.type || 'Unknown',
                                     nodeTitle: node.title || node.type || 'Unknown'
                                 });
@@ -650,13 +731,14 @@ export class DownloaderUI {
                     }
 
                     const valueStr = widget.value.toString();
-                    const extension = '.' + valueStr.split('.').pop().toLowerCase();
+                    const normalizedValue = valueStr.replace(/\\/g, '/');
+                    const extension = '.' + normalizedValue.split('.').pop().toLowerCase();
                     
                     // Check if this is a model file
                     if (modelExtensions.includes(extension)) {
                         // Extract filename
-                        const filename = valueStr.split('/').pop();
-                        const filenamePath = valueStr;
+                        const filename = normalizedValue.split('/').pop();
+                        const filenamePath = normalizedValue;
                         
                         // Extract directory from widget options
                         let directory = null;
@@ -681,7 +763,7 @@ export class DownloaderUI {
                                 fullPath: fullPath,
                                 extension: extension,
                                 url: null, // Will be looked up from model-list.json
-                                directory: directory || "diffusion_models", // Will be looked up from model-list.json
+                                directory: directory || null,
                                 nodeType: node.type || 'Unknown',
                                 nodeTitle: node.title || node.type || 'Unknown'
                             });
@@ -721,13 +803,28 @@ export class DownloaderUI {
         // Convert Map to array and look up URLs and directories for models from Priority 2 (widgets_values)
         const modelsArray = Array.from(modelsFound.values());
         
-        // Look up URLs and directories from model-list.json for models without URL
+        // Look up URLs and directories from model-list.json
         for (let model of modelsArray) {
-            if (!model.url) {
-                const modelInfo = await this.getModelInfo(model.filename);
+            const modelInfo = await this.getModelInfo(model.filename);
+            if (!model.url && modelInfo.url) {
                 model.url = modelInfo.url;
-                if (modelInfo.directory) {
-                    model.directory = modelInfo.directory;
+            }
+
+            if (!model.directory) {
+                const resolvedDirectory = this.resolveModelDirectory(modelInfo.directory, modelInfo.type, folderNameSet);
+                if (resolvedDirectory) {
+                    model.directory = resolvedDirectory;
+
+                    // If model-list uses nested save_path (e.g. checkpoints/sdxl),
+                    // append that relative part when workflow value has only filename.
+                    const normalizedSavePath = this.normalizeRelativePath(modelInfo.directory || '');
+                    const savePathParts = normalizedSavePath.split('/').filter(Boolean);
+                    const relativeSavePath = savePathParts.slice(1).join('/');
+                    const currentPath = this.normalizeRelativePath(model.filenamePath || model.filename);
+                    if (relativeSavePath && !currentPath.includes('/')) {
+                        model.filenamePath = `${relativeSavePath}/${currentPath}`;
+                        model.fullPath = `${resolvedDirectory}/${model.filenamePath}`;
+                    }
                 }
             }
         }
@@ -806,11 +903,19 @@ export class DownloaderUI {
                         </select>
                         <input 
                             type="text" 
+                            class="downloader-filename-input" 
+                            placeholder="Filename or subfolder/file.ext"
+                            value="${this.escapeHtml(model.filenamePath || model.filename)}"
+                            data-model-index="${index}"
+                            style="flex: 1.5; min-width: 260px; padding: 5px;"
+                        />
+                        <input 
+                            type="text" 
                             class="downloader-url-input" 
                             placeholder="Download URL..." 
                             value="${this.escapeHtml(model.url || '')}"
                             data-model-index="${index}"
-                            style="flex: 2; min-width: 300px; padding: 5px;"
+                            style="flex: 1.8; min-width: 300px; padding: 5px;"
                         />
                         <button 
                             class="downloader-download-btn" 
@@ -837,9 +942,10 @@ export class DownloaderUI {
         downloadButtons.forEach(async (button) => {
             const modelIndex = parseInt(button.dataset.modelIndex);
             const model = this.modelsInWorkflow[modelIndex];
+            const initialPath = this.normalizeRelativePath(model.filenamePath || model.filename);
             
             // Check if file already exists in ComfyUI
-            const fileExists = await this.isFileDownloaded(model.directory || '', model.filenamePath);
+            const fileExists = await this.isFileDownloaded(model.directory || '', initialPath);
             if (fileExists) {
                 button.textContent = '✓ Downloaded';
                 button.style.backgroundColor = '#4CAF50';
@@ -859,9 +965,11 @@ export class DownloaderUI {
                 // Handle download action
                 // Get current values from inputs
                 const directoryInput = listContainer.querySelector(`.downloader-directory-input[data-model-index="${modelIndex}"]`);
+                const filenameInput = listContainer.querySelector(`.downloader-filename-input[data-model-index="${modelIndex}"]`);
                 const urlInput = listContainer.querySelector(`.downloader-url-input[data-model-index="${modelIndex}"]`);
                 
                 const directory = directoryInput?.value.trim();
+                const filenamePath = this.normalizeRelativePath(filenameInput?.value.trim() || '');
                 const url = urlInput?.value.trim();
                 
                 if (!url) {
@@ -873,9 +981,20 @@ export class DownloaderUI {
                     alert('Please enter a folder/directory path');
                     return;
                 }
+
+                if (!filenamePath) {
+                    alert('Please enter filename/path');
+                    return;
+                }
+
+                // Persist edited path in memory so refreshed UI keeps the change.
+                model.filenamePath = filenamePath;
+                model.filename = filenamePath.split('/').pop();
+                model.fullPath = `${directory}/${filenamePath}`;
+                model.directory = directory;
                 
                 // Start download and get the real download_id from backend
-                const result = await this.startServerDownload(url, directory, model.filenamePath);
+                const result = await this.startServerDownload(url, directory, filenamePath);
                 
                 // Update button's download_id with the one returned from backend
                 if (result && result.success && result.download_id) {

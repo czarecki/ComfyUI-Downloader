@@ -24,6 +24,59 @@ NUM_CONNECTIONS = 8  # 8 parallel connections - optimal for DC bandwidth
 
 API_PREFIX = "35b631e00fa2dbc173ee4a5f899cba8f"
 
+DISALLOWED_DOWNLOAD_FOLDERS = {
+    "custom_nodes",
+    "configs",
+    "input",
+    "output",
+    "temp",
+    "user",
+}
+
+# ComfyUI-Manager-compatible aliases for model directories.
+MODEL_DIR_ALIASES = {
+    "checkpoints": "checkpoints",
+    "checkpoint": "checkpoints",
+    "unclip": "checkpoints",
+    "text_encoders": "text_encoders",
+    "clip": "text_encoders",
+    "vae": "vae",
+    "lora": "loras",
+    "t2i-adapter": "controlnet",
+    "t2i-style": "controlnet",
+    "controlnet": "controlnet",
+    "clip_vision": "clip_vision",
+    "gligen": "gligen",
+    "upscale": "upscale_models",
+    "embedding": "embeddings",
+    "embeddings": "embeddings",
+    "unet": "diffusion_models",
+    "diffusion_model": "diffusion_models",
+}
+
+
+def _normalize_for_match(path):
+    """Normalize separators for reliable path checks across platforms."""
+    return os.path.normpath(path).replace("/", os.sep).replace("\\", os.sep).lower()
+
+
+def _looks_like_model_path(path):
+    normalized = _normalize_for_match(path)
+    marker = f"{os.sep}models{os.sep}"
+    return marker in normalized
+
+
+def _is_downloadable_folder(folder_name, paths):
+    """Allow only model-related folders and block unsafe targets."""
+    if folder_name in DISALLOWED_DOWNLOAD_FOLDERS:
+        return False
+    if not paths:
+        return False
+    if folder_name in MODEL_DIR_ALIASES.values():
+        return True
+    return any(_looks_like_model_path(path) for path in paths)
+
+
 # Save the original function before wrapping
 original_get_filename_list = folder_paths.get_filename_list
 
@@ -37,7 +90,7 @@ def get_filename_list_wrapper(folder_name):
         mapped_folder = folder_paths.map_legacy(folder_name)
         if mapped_folder in folder_paths.folder_names_and_paths:
             paths, _ = folder_paths.folder_names_and_paths[mapped_folder]
-            if paths and any("/models/" in path for path in paths):  # Check if paths list is not empty and contains /models/
+            if _is_downloadable_folder(mapped_folder, paths):
                 folder_entry = "__folder__path__" + folder_name
                 if not result:
                     result = [folder_entry]
@@ -99,23 +152,23 @@ async def start_download(request):
                 {"error": f"No valid paths configured for {save_path}"},
                 status=400
             )
-
-        # Filter paths to only include those containing /models/
-        model_paths = [path for path in paths if "/models/" in path]
-        if not model_paths:
+        if not _is_downloadable_folder(mapped_folder, paths):
             return web.json_response(
-                {"error": f"No valid model paths (containing /models/) configured for {save_path}"},
+                {"error": f"Invalid save_path for download: {save_path}"},
                 status=400
             )
 
         # Use the first path from the configured paths
-        output_dir = model_paths[0]
+        output_dir = os.path.abspath(paths[0])
         output_path = os.path.join(output_dir, safe_filename)
 
         # Final security check: ensure the resolved path is within the configured directory
         output_path = os.path.abspath(output_path)
-        output_dir = os.path.abspath(output_dir)
-        if not output_path.startswith(output_dir + os.sep):
+        try:
+            common = os.path.commonpath([output_dir, output_path])
+        except ValueError:
+            common = ""
+        if common != output_dir:
             return web.json_response(
                 {"error": "Security error: attempted directory escape"},
                 status=400
@@ -586,7 +639,7 @@ async def get_folder_names(request):
         # Only return folders that have valid paths (non-empty paths list)
         folder_names = []
         for folder_name, (paths, _) in folder_paths.folder_names_and_paths.items():
-            if paths and any("/models/" in path for path in paths):  # Check if paths list is not empty and contains /models/
+            if _is_downloadable_folder(folder_name, paths):
                 folder_names.append(folder_name)
         
         return web.json_response({
