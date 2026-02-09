@@ -559,6 +559,9 @@ export class DownloaderUI {
             case 'possible':
                 badge.style.color = '#ffd166';
                 break;
+            case 'missing':
+                badge.style.color = '#ff6b6b';
+                break;
             default:
                 badge.style.color = '#d6d6d6';
                 break;

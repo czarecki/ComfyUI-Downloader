@@ -7,7 +7,7 @@ console.log("Loading ComfyUI-Downloader...");
 const EXTENSION_NAME = "ComfyUI-Downloader";
 const API_PREFIX = "35b631e00fa2dbc173ee4a5f899cba8f";
 const CSS_URL = `/${API_PREFIX}/extensions/ComfyUI-Downloader/css/downloader.css`;
-const USE_FLOATING_BUTTON = true;
+const USE_FLOATING_BUTTON = false;
 const FLOAT_POS_STORAGE_KEY = `${EXTENSION_NAME}.floatingButtonPos`;
 
 // Load CSS
@@ -72,9 +72,19 @@ function addMenuButton() {
     downloaderButton.style.margin = "0 5px";
 
     downloaderButton.onclick = openDownloaderModal;
+    
+    const managerButton =
+        buttonGroup.querySelector("#comfyui-manager-button, #cm-button, #manager-button") ||
+        Array.from(buttonGroup.querySelectorAll("button")).find(b => (b.textContent || "").trim().toLowerCase() === "manager");
 
-    buttonGroup.appendChild(downloaderButton);
-    console.log(`[${EXTENSION_NAME}] Downloader button added to .comfyui-button-group.`);
+    if (managerButton) {
+        downloaderButton.style.marginLeft = "14px"; // Keep a visible gap from Manager.
+        managerButton.insertAdjacentElement("afterend", downloaderButton);
+        console.log(`[${EXTENSION_NAME}] Downloader button added next to Manager with extra spacing.`);
+    } else {
+        buttonGroup.appendChild(downloaderButton);
+        console.log(`[${EXTENSION_NAME}] Downloader button added to .comfyui-button-group.`);
+    }
 
     const menu = document.querySelector(".comfy-menu");
     if (!buttonGroup.contains(downloaderButton) && menu && !menu.contains(downloaderButton)) {
