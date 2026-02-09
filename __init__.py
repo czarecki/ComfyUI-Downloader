@@ -77,33 +77,6 @@ def _is_downloadable_folder(folder_name, paths):
     return any(_looks_like_model_path(path) for path in paths)
 
 
-# Save the original function before wrapping
-original_get_filename_list = folder_paths.get_filename_list
-
-# Wrapper for folder_paths.get_filename_list
-def get_filename_list_wrapper(folder_name):
-    """Wrapper for folder_paths.get_filename_list to get list of files in a folder"""
-    try:
-        # print("get_filename_list wrapper called for folder:", folder_name)
-        result = original_get_filename_list(folder_name)
-        # Prepend folder path entry for download directory
-        mapped_folder = folder_paths.map_legacy(folder_name)
-        if mapped_folder in folder_paths.folder_names_and_paths:
-            paths, _ = folder_paths.folder_names_and_paths[mapped_folder]
-            if _is_downloadable_folder(mapped_folder, paths):
-                folder_entry = "__folder__path__" + folder_name
-                if not result:
-                    result = [folder_entry]
-                else:
-                    result = [folder_entry] + result
-        return result
-    except Exception as e:
-        logging.error(f"[ComfyUI-Downloader] Error getting file list for {folder_name}: {e}")
-        return []
-
-folder_paths.get_filename_list = get_filename_list_wrapper
-
-
 @PromptServer.instance.routes.post(f"/{API_PREFIX}/server_download/start")
 async def start_download(request):
     """Start downloading a model file to the server"""
@@ -648,6 +621,42 @@ async def get_folder_names(request):
         })
     except Exception as e:
         logging.error(f"[ComfyUI-Downloader] Error getting folder names: {e}")
+        return web.json_response(
+            {"error": str(e)},
+            status=500
+        )
+
+
+@PromptServer.instance.routes.get(f"/{API_PREFIX}/available_files")
+async def get_available_files(request):
+    """Get available files grouped by downloadable folder name."""
+    try:
+        files_by_folder = {}
+
+        for folder_name, (paths, _) in folder_paths.folder_names_and_paths.items():
+            if not _is_downloadable_folder(folder_name, paths):
+                continue
+
+            try:
+                files = folder_paths.get_filename_list(folder_name)
+            except Exception as e:
+                logging.warning(f"[ComfyUI-Downloader] Failed to get file list for {folder_name}: {e}")
+                files = []
+
+            # Normalize slashes and keep only valid string entries.
+            normalized_files = [
+                f.replace("\\", "/")
+                for f in files
+                if isinstance(f, str) and not f.startswith("__folder__path__")
+            ]
+            files_by_folder[folder_name] = normalized_files
+
+        return web.json_response({
+            "success": True,
+            "files": files_by_folder
+        })
+    except Exception as e:
+        logging.error(f"[ComfyUI-Downloader] Error getting available files: {e}")
         return web.json_response(
             {"error": str(e)},
             status=500

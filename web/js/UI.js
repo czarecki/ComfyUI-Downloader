@@ -30,7 +30,6 @@ export class DownloaderUI {
         this.modelListCache = null; // Cache for model-list.json
         this.modelExtensionsCache = null; // Cache for supported extensions
         this.folderNamesCache = null; // Cache for folder names
-        this.objectInfoCache = null; // Cache for object_info
         this.availableFilesCache = null; // Cache for parsed available files
         this.downloadStates = new Map(); // Track download states
         this.setupDownloadListeners();
@@ -288,29 +287,7 @@ export class DownloaderUI {
     }
 
     /**
-     * Load object_info from ComfyUI API to get available files
-     */
-    async loadObjectInfo() {
-        if (this.objectInfoCache) {
-            return this.objectInfoCache;
-        }
-
-        try {
-            const response = await api.fetchApi('/object_info');
-            if (!response.ok) {
-                console.warn("[DownloaderUI] Failed to load object_info");
-                return null;
-            }
-            this.objectInfoCache = await response.json();
-            return this.objectInfoCache;
-        } catch (error) {
-            console.warn("[DownloaderUI] Error loading object_info:", error);
-            return null;
-        }
-    }
-
-    /**
-     * Parse object_info to extract available files by folder
+     * Load available files by folder from Downloader backend endpoint
      * Returns a Map: folder -> Set of filenames
      */
     async getAvailableFiles() {
@@ -318,50 +295,30 @@ export class DownloaderUI {
             return this.availableFilesCache;
         }
 
-        const objectInfo = await this.loadObjectInfo();
-        if (!objectInfo) {
-            return new Map();
-        }
-
         const availableFiles = new Map();
-
-        // Iterate through all node types
-        for (const [nodeType, nodeData] of Object.entries(objectInfo)) {
-            if (!nodeData.input || !nodeData.input.required) {
-                continue;
+        try {
+            const response = await api.fetchApi(`/${API_PREFIX}/available_files`);
+            if (!response.ok) {
+                console.warn("[DownloaderUI] Failed to load available files");
+                return availableFiles;
             }
 
-            // Check each input parameter
-            for (const [paramName, paramData] of Object.entries(nodeData.input.required)) {
-                if (!Array.isArray(paramData) || paramData.length === 0) {
-                    continue;
-                }
-
-                const options = paramData[0];
-                if (!Array.isArray(options)) {
-                    continue;
-                }
-
-                // Look for __folder__path__ prefix
-                const folderPathItem = options.find(item => 
-                    typeof item === 'string' && item.startsWith('__folder__path__')
-                );
-
-                if (folderPathItem) {
-                    const folder = folderPathItem.replace('__folder__path__', '');
-                    
-                    if (!availableFiles.has(folder)) {
-                        availableFiles.set(folder, new Set());
-                    }
-
-                    // Add all other items (filenames) to this folder
-                    options.forEach(item => {
-                        if (typeof item === 'string' && !item.startsWith('__folder__path__')) {
-                            availableFiles.get(folder).add(item);
-                        }
-                    });
-                }
+            const data = await response.json();
+            if (!data.success || typeof data.files !== 'object' || data.files === null) {
+                return availableFiles;
             }
+
+            for (const [folder, files] of Object.entries(data.files)) {
+                if (!Array.isArray(files)) {
+                    continue;
+                }
+                const normalized = files
+                    .filter(f => typeof f === 'string')
+                    .map(f => f.replace(/\\/g, '/'));
+                availableFiles.set(folder, new Set(normalized));
+            }
+        } catch (error) {
+            console.warn("[DownloaderUI] Error loading available files:", error);
         }
 
         this.availableFilesCache = availableFiles;
@@ -376,6 +333,7 @@ export class DownloaderUI {
      */
     async isFileDownloaded(folder, filename) {
         const availableFiles = await this.getAvailableFiles();
+        const normalizedFilename = this.normalizeRelativePath(filename);
         
         if (!availableFiles.has(folder)) {
             return false;
@@ -384,13 +342,13 @@ export class DownloaderUI {
         const filesInFolder = availableFiles.get(folder);
         
         // Check exact match
-        if (filesInFolder.has(filename)) {
+        if (filesInFolder.has(normalizedFilename)) {
             return true;
         }
 
         // Check if any file ends with this filename (for subdirectory cases)
         for (const file of filesInFolder) {
-            if (file.endsWith(filename) || file.endsWith('/' + filename)) {
+            if (file.endsWith(normalizedFilename) || file.endsWith('/' + normalizedFilename)) {
                 return true;
             }
         }
