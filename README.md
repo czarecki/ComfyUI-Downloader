@@ -12,13 +12,14 @@ The project remains under the same MIT License.
 
 ## Fork Changes (czarecki)
 
-This fork currently adds reliability and UX improvements for model destination paths:
+This fork adds reliability and UX improvements for model destination paths and missing-model workflow:
 
 - Fixed Windows path handling for model folder detection in backend logic.
 - Improved folder validation to allow model-related targets and block non-model folders.
-- Added explicit filename/path input per workflow model row (`subfolder/file.ext` support).
-- Added optional subfolder input in manual download mode.
-- Restored and improved `model-list.json` directory/type mapping so default destinations are selected more accurately.
+- Added strict match mode and exact installed-path status to reduce false positives.
+- Added "Open Folder" action for model rows and fixed delegated click handling.
+- Switched Downloader entry point to a floating button, now draggable and positioned near ComfyUI Manager by default.
+- Updated missing-model status styling and action layout for clearer at-a-glance state.
 
 ## Features
 
