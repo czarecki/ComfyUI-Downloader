@@ -18,7 +18,7 @@ This fork adds reliability and UX improvements for model destination paths and m
 - Improved folder validation to allow model-related targets and block non-model folders.
 - Added strict match mode and exact installed-path status to reduce false positives.
 - Added "Open Folder" action for model rows and fixed delegated click handling.
-- Switched Downloader entry point to a floating button, now draggable and positioned near ComfyUI Manager by default.
+- Restored the standard menu/button-group Downloader button near ComfyUI Manager (floating mode was rolled back due to stability/UX issues).
 - Updated missing-model status styling and action layout for clearer at-a-glance state.
 
 ## Features
